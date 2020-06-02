@@ -1,7 +1,7 @@
-use heck::CamelCase;
+use crate::Icon;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, fs};
 
 static ICON_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^ic_(.*)_(\d+)px\.svg$").unwrap());
 const ICON_CATEGORIES: &[&str] = &[
@@ -23,34 +23,14 @@ const ICON_CATEGORIES: &[&str] = &[
     "toggle",
 ];
 
-pub fn find_icons() -> impl Iterator<Item = Icon> {
-    FindIcons {
-        idx: 0,
-        current: vec![],
-    }
-}
-
-// Wouldn't it be nice if generators were a thing.
-struct FindIcons {
-    idx: usize,
-    current: Vec<Icon>,
-}
-
-impl Iterator for FindIcons {
-    type Item = Icon;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx < ICON_CATEGORIES.len() {
-            if self.current.is_empty() {
-                self.current
-                    .extend(icon_category(ICON_CATEGORIES[self.idx]));
-                self.idx += 1;
-            }
-            Some(self.current.pop().unwrap())
-        } else {
-            None
+pub(crate) fn find_icons() -> Vec<Icon> {
+    let mut icons: HashMap<String, Icon> = HashMap::new();
+    for category in ICON_CATEGORIES.iter() {
+        for icon in icon_category(category) {
+            icons.insert(icon.rust_name(), icon);
         }
     }
+    icons.into_iter().map(|(_, icon)| icon).collect()
 }
 
 /// Find all the largest icons in the category.
@@ -63,6 +43,7 @@ fn icon_category(name: &str) -> impl Iterator<Item = Icon> + 'static {
         let captures = match ICON_REGEX.captures(&icon) {
             Some(c) => c,
             None => {
+                // TODO handle non-square icons
                 eprintln!("Skipping {:?}", icon);
                 continue;
             }
