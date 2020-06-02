@@ -1,4 +1,3 @@
-
 use druid::{
     kurbo::{Affine, Circle, PathEl, Point},
     piet::RenderContext,

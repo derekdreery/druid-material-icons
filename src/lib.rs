@@ -1,1 +1,2 @@
-pub mod icons;
+mod icons;
+pub use icons::*;
