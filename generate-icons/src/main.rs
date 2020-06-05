@@ -1,7 +1,7 @@
 mod find;
 
 use crate::find::find_icons;
-use heck::CamelCase;
+use heck::ShoutySnakeCase;
 use roxmltree::{Document, Node};
 use std::{
     fmt::{self, Display, Write},
@@ -12,17 +12,6 @@ use std::{
 
 fn main() {
     let mut out = fs::File::create("icons.rs").unwrap();
-    writeln!(
-        out,
-        r#"
-        use druid::{{
-            Data, Color, Size,
-            kurbo::{{Point, PathEl, Circle, Affine}},
-            piet::RenderContext,
-        }};
-    "#
-    )
-    .unwrap();
     for icon in find_icons() {
         writeln!(out, "{}", icon.implement()).unwrap();
     }
@@ -32,34 +21,43 @@ fn main() {
 struct Icon {
     category: String,
     prefix: String,
-    size: u32,
+    size: kurbo::Size,
 }
 
 impl Icon {
     fn path(&self) -> PathBuf {
         format!(
             "../material-design-icons/{}/svg/production/ic_{}_{}px.svg",
-            self.category, self.prefix, self.size
+            self.category,
+            self.prefix,
+            MaterialSize(self.size)
         )
         .into()
     }
 
-    fn rust_name(&self) -> String {
-        let name = self.prefix.to_camel_case();
+    fn const_name(&self) -> String {
+        let name = self.prefix.to_shouty_snake_case();
         if name.starts_with("3") {
-            format!("Three{}", &name[1..])
+            format!("THREE_{}", &name[1..])
         } else {
             name
         }
     }
 
     fn shapes(&self) -> Vec<KurboShape> {
-        let raw = fs::read_to_string(&self.path()).unwrap();
+        println!("Getting {}", self.path().display());
+        let raw = fs::read_to_string(self.path()).unwrap();
         let doc = Document::parse(&raw).unwrap();
         let svg = doc.root_element();
         assert!(svg.has_tag_name("svg"));
-        assert_eq!(svg.attribute("width").unwrap(), self.size.to_string());
-        assert_eq!(svg.attribute("height").unwrap(), self.size.to_string());
+        assert_eq!(
+            svg.attribute("width").unwrap(),
+            MaterialSize(self.size).to_string()
+        );
+        assert_eq!(
+            svg.attribute("height").unwrap(),
+            MaterialSize(self.size).to_string()
+        );
         svg.children().map(|el| KurboShape::from_svg(el)).collect()
     }
 
@@ -97,16 +95,16 @@ impl Display for KurboShape {
         match self {
             KurboShape::Circle(circle) => write!(
                 f,
-                "Circle {{ center: {}, radius: {:.2} }}",
+                "IconShape::Circle(Circle {{ center: {}, radius: {:.2} }})",
                 KurboPoint(circle.center),
                 circle.radius
             ),
             KurboShape::BezPath(path) => {
-                f.write_str("&[")?;
+                f.write_str("IconShape::PathEls(&[")?;
                 for el in path.iter() {
                     write!(f, "{},", KurboEl(el))?;
                 }
-                f.write_str("][..]")
+                f.write_str("])")
             }
         }
     }
@@ -117,6 +115,18 @@ pub struct KurboPoint(kurbo::Point);
 impl Display for KurboPoint {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Point {{ x: {:.2}, y: {:.2} }}", self.0.x, self.0.y)
+    }
+}
+
+pub struct KurboSize(kurbo::Size);
+
+impl Display for KurboSize {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Size {{ width: {:.2}, height: {:.2} }}",
+            self.0.width, self.0.height
+        )
     }
 }
 
@@ -150,71 +160,33 @@ pub struct Implement<'a>(&'a Icon);
 
 impl Display for Implement<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut paint = String::new();
+        let mut shapes = String::new();
         for shape in self.0.shapes() {
-            writeln!(paint, "ctx.fill({}, &brush);", shape)?;
+            writeln!(shapes, "{},", shape)?;
         }
         write!(
             f,
             r#"
-pub struct {icon} {{
-    size: f64,
-    color: Color,
-}}
-
-impl {icon} {{
-    pub fn new(color: Color, size: f64) -> Self {{
-        Self {{ color, size }}
-    }}
-}}
-
-impl<T: Data> ::druid::Widget<T> for {icon} {{
-    fn event(
-        &mut self,
-        _ctx: &mut ::druid::EventCtx,
-        _event: &::druid::Event,
-        _data: &mut T,
-        _env: &::druid::Env
-    ) {{
-        // no events
-    }}
-    fn lifecycle(
-        &mut self,
-        _ctx: &mut ::druid::LifeCycleCtx,
-        _event: &::druid::LifeCycle,
-        _data: &T,
-        _env: &::druid::Env
-    ) {{
-        // no lifecycle
-    }}
-    fn update(&mut self,
-        _ctx: &mut ::druid::UpdateCtx,
-        _old_data: &T,
-        _data: &T,
-        _env: &::druid::Env
-    ) {{
-        // no update
-    }}
-    fn layout(
-        &mut self,
-        _ctx: &mut ::druid::LayoutCtx,
-        bc: &::druid::BoxConstraints,
-        _data: &T,
-        _env: &::druid::Env
-    ) -> Size {{
-        bc.constrain((self.size, self.size))
-    }}
-    fn paint(&mut self, ctx: &mut ::druid::PaintCtx, _data: &T, _env: &::druid::Env) {{
-        let Size {{ width, height }} = ctx.size();
-        ctx.transform(Affine::scale_non_uniform(width / {size}.0, height / {size}.0));
-        let brush = ctx.solid_brush(self.color.clone());
-        {paint}
-    }}
-}}
+pub const {}: IconShapes = IconShapes {{
+    shapes: &[{}],
+    size: {},
+}};
         "#,
-            icon = self.0.rust_name(),
-            paint = paint,
-            size = self.0.size,
+            self.0.const_name(),
+            shapes,
+            KurboSize(self.0.size)
         )
+    }
+}
+
+pub struct MaterialSize(kurbo::Size);
+
+impl Display for MaterialSize {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.0.width == self.0.height {
+            write!(f, "{}", self.0.width)
+        } else {
+            write!(f, "{}x{}", self.0.width, self.0.height)
+        }
     }
 }

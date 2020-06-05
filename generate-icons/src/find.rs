@@ -1,4 +1,5 @@
 use crate::Icon;
+use kurbo::Size;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{collections::HashMap, fs};
@@ -27,7 +28,7 @@ pub(crate) fn find_icons() -> Vec<Icon> {
     let mut icons: HashMap<String, Icon> = HashMap::new();
     for category in ICON_CATEGORIES.iter() {
         for icon in icon_category(category) {
-            icons.insert(icon.rust_name(), icon);
+            icons.insert(icon.const_name(), icon);
         }
     }
     icons.into_iter().map(|(_, icon)| icon).collect()
@@ -60,6 +61,9 @@ fn icon_category(name: &str) -> impl Iterator<Item = Icon> + 'static {
     icons.into_iter().map(move |(prefix, size)| Icon {
         category: category.clone(),
         prefix,
-        size,
+        size: Size {
+            width: size as f64,
+            height: size as f64,
+        },
     })
 }
