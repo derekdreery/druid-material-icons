@@ -4,8 +4,13 @@ version = "0.1.0"
 authors = ["Richard Dodd <richard.o.dodd@gmail.com>"]
 edition = "2018"
 
+[features]
+default = ["druid"]
+
 [dependencies]
-druid = "0.6"
+# We only use a small amount of druid, so take a chance that we will always be compatible.
+druid = { version = "*", optional = true }
+kurbo = "*"
 
 [workspace]
 members = [

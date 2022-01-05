@@ -1,8 +1,11 @@
+#[cfg(feature = "druid")]
 use druid::{
     kurbo::{Affine, BezPath, Circle, PathEl, Point, Rect, Shape, Size},
     widget::prelude::*,
     Color, Data,
 };
+#[cfg(not(feature = "druid"))]
+use kurbo::{BezPath, Circle, PathEl, Point, Rect, Shape, Size};
 
 /// A widget that displays a material icon. Use constraints to set the preferred size.
 ///
@@ -18,11 +21,13 @@ use druid::{
 /// }
 /// ```
 #[derive(Debug, Clone)]
+#[cfg(feature = "druid")]
 pub struct Icon {
     shapes: IconShapes,
     color: Color,
 }
 
+#[cfg(feature = "druid")]
 impl Icon {
     #[inline]
     fn new(shapes: IconShapes, color: Color) -> Self {
@@ -30,6 +35,7 @@ impl Icon {
     }
 }
 
+#[cfg(feature = "druid")]
 impl<T: Data> Widget<T> for Icon {
     fn event(&mut self, _ctx: &mut EventCtx, _event: &Event, _data: &mut T, _env: &Env) {
         // no events
@@ -75,10 +81,11 @@ impl<T: Data> Widget<T> for Icon {
 /// ```
 #[derive(Debug, Copy, Clone)]
 pub struct IconShapes {
-    shapes: &'static [IconShape],
-    size: Size,
+    pub shapes: &'static [IconShape],
+    pub size: Size,
 }
 
+#[cfg(feature = "druid")]
 impl IconShapes {
     pub fn new(self, color: Color) -> Icon {
         Icon::new(self, color)
@@ -86,17 +93,17 @@ impl IconShapes {
 }
 
 #[derive(Debug, Copy, Clone)]
-enum IconShape {
+pub enum IconShape {
     PathEls(&'static [PathEl]),
     Circle(Circle),
 }
 
 impl Shape for IconShape {
-    type BezPathIter = Box<dyn Iterator<Item = PathEl>>; // GATs would be better here.
-    fn to_bez_path(&self, tolerance: f64) -> Self::BezPathIter {
+    type PathElementsIter = Box<dyn Iterator<Item = PathEl>>;
+    fn path_elements(&self, tolerance: f64) -> Self::PathElementsIter {
         match self {
-            IconShape::PathEls(els) => Box::new(els.to_bez_path(tolerance)),
-            IconShape::Circle(circle) => Box::new(circle.to_bez_path(tolerance)),
+            IconShape::PathEls(els) => Box::new(els.path_elements(tolerance)),
+            IconShape::Circle(circle) => Box::new(circle.path_elements(tolerance)),
         }
     }
     fn area(&self) -> f64 {
@@ -126,8 +133,8 @@ impl Shape for IconShape {
 
     fn into_bez_path(self, tolerance: f64) -> BezPath {
         match self {
-            IconShape::PathEls(els) => els.into_bez_path(tolerance),
-            IconShape::Circle(circle) => circle.into_bez_path(tolerance),
+            IconShape::PathEls(els) => els.into_path(tolerance),
+            IconShape::Circle(circle) => circle.into_path(tolerance),
         }
     }
     fn as_circle(&self) -> Option<Circle> {
@@ -150,6 +157,7 @@ include!("./icons.rs.in");
 ///
 /// If the given aspect ratio is not possible, then first choose the closest aspect ratio
 /// possible, then choose the largest size possible with that ratio.
+#[cfg(feature = "druid")]
 fn max_with_aspect(bc: &BoxConstraints, aspect_ratio: f64) -> Size {
     // TODO infinity (this might automatically work)
     // If the there is a point on the aspect ratio line with maximum width, it is the solution.
@@ -188,6 +196,7 @@ fn max_with_aspect(bc: &BoxConstraints, aspect_ratio: f64) -> Size {
     }
 }
 
+#[cfg(feature = "druid")]
 fn aspect_ratiof(size: Size) -> f64 {
     size.height * size.width.recip()
 }
