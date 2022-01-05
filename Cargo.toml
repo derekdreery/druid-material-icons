@@ -1,8 +1,12 @@
 [package]
 name = "druid-material-icons"
+description = "Material icons, converted to kurbo paths"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/derekdreery/druid-material-icons"
 version = "0.1.0"
 authors = ["Richard Dodd <richard.o.dodd@gmail.com>"]
 edition = "2018"
+exclude = ["material-design-icons", "test.sh"]
 
 [features]
 default = ["druid"]
