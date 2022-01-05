@@ -13,7 +13,7 @@ default = ["druid"]
 
 [dependencies]
 # We only use a small amount of druid, so take a chance that we will always be compatible.
-druid = { git = "https://github.com/linebender/druid", optional = true }
+druid = { git = "https://github.com/linebender/druid", optional = true, rev="0a82b127eac325c9c721364a5d81f1bfd931cb1" }
 kurbo = "0.8.3"
 
 [workspace]
