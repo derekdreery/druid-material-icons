@@ -30,7 +30,7 @@ pub struct Icon {
 #[cfg(feature = "druid")]
 impl Icon {
     #[inline]
-    fn new(paths: IconPaths, color: Color) -> Self {
+    pub fn new(paths: IconPaths, color: Color) -> Self {
         Self { paths, color }
     }
 }
@@ -99,8 +99,8 @@ impl IconPaths {
 
 #[derive(Debug, Copy, Clone)]
 pub struct IconPath {
-    els: &'static [PathEl],
-    opacity: f64,
+    pub els: &'static [PathEl],
+    pub opacity: f64,
 }
 
 impl Shape for IconPath {
