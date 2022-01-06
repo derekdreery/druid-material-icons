@@ -1,64 +1,180 @@
-mod find;
-
-use crate::find::find_icons;
 use heck::ShoutySnakeCase;
-use roxmltree::{Document, Node};
+use once_cell::sync::Lazy;
+use qu::ick_use::*;
+use regex::Regex;
 use std::{
+    collections::BTreeMap,
     fmt::{self, Display, Write},
     fs,
     io::Write as IoWrite,
-    path::PathBuf,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
-fn main() {
-    let mut out = fs::File::create("icons.rs").unwrap();
-    for icon in find_icons() {
-        writeln!(out, "{}", icon.implement()).unwrap();
+static ICON_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\d+)px\.svg$").unwrap());
+const USE: &str = r#"
+use crate::{PathEl, Point, Size, IconPath, IconPaths};
+"#;
+
+#[qu::ick]
+fn main() -> Result {
+    let icons = Icons::load("../material-design-icons")?;
+    let mut out = fs::File::create("icons.rs").context("creating `icons.rs`")?;
+    for (variant, icons) in icons.0.iter() {
+        // We are generating way too much output, which slows down rustc a lot. I would love to
+        // hear any suggestions on how to improve this...
+        if &**variant != "normal" {
+            continue;
+        }
+        //writeln!(out, "#[cfg(feature = \"{0}\")]\npub mod {0} {{", variant)?;
+        writeln!(out, "pub mod {0} {{", variant)?;
+        for (category, icons) in icons.iter() {
+            //writeln!(out, "#[cfg(feature = \"{0}\")]\npub mod {0} {{", category)?;
+            writeln!(out, "pub mod {0} {{", category)?;
+            writeln!(out, "{}", USE)?;
+            for icon in icons.values() {
+                writeln!(out, "{}", icon.implement())?;
+            }
+            writeln!(out, "}}")?;
+        }
+        writeln!(out, "}}")?;
+    }
+    Ok(())
+}
+
+struct Icons(BTreeMap<Arc<str>, BTreeMap<Arc<str>, BTreeMap<Arc<str>, Icon>>>);
+
+impl Icons {
+    /// Load all found icons into memory.
+    fn load(root: impl AsRef<Path>) -> Result<Self> {
+        let mut icons = Icons(BTreeMap::new());
+        let root = root.as_ref().join("src");
+        for entry in fs::read_dir(&root).context("reading root directory")? {
+            let entry = entry?;
+            let category: Arc<str> = entry
+                .file_name()
+                .into_string()
+                .ok()
+                .context("non-utf8 category filename")?
+                .into();
+            for entry in fs::read_dir(&entry.path())? {
+                let entry = entry?;
+                let name: Arc<str> = entry
+                    .file_name()
+                    .into_string()
+                    .ok()
+                    .context("non-utf8 icon filename")?
+                    .into();
+                for entry in fs::read_dir(&entry.path())? {
+                    let entry = entry?;
+                    let variant = entry
+                        .file_name()
+                        .into_string()
+                        .ok()
+                        .context("non-utf8 variant filename")?;
+                    let variant = variant
+                        .strip_prefix("materialicons")
+                        .context("unexpected variant format")?;
+                    let variant: Arc<str> = if variant.is_empty() {
+                        "normal"
+                    } else {
+                        variant
+                    }
+                    .into();
+                    for entry in fs::read_dir(&entry.path())? {
+                        let entry = entry?;
+                        let filename = entry
+                            .file_name()
+                            .into_string()
+                            .ok()
+                            .context("non-utf8 file filename")?;
+                        let captures = ICON_REGEX
+                            .captures(&filename)
+                            .context("icon filename not in expected format")?;
+                        let size = captures
+                            .get(1)
+                            .unwrap()
+                            .as_str()
+                            .parse::<f64>()
+                            .context("parsing icon size")?;
+                        let path = entry.path();
+                        log::trace!("loading icon {}", path.display());
+                        let icon = Icon::from_path(
+                            &path,
+                            category.clone(),
+                            name.clone(),
+                            variant.clone(),
+                            size,
+                        )
+                        .with_context(|| format!("loading icon {}", path.display()))?;
+                        icons
+                            .0
+                            .entry(variant.clone())
+                            .or_default()
+                            .entry(category.clone())
+                            .or_default()
+                            .insert(name.clone(), icon);
+                    }
+                }
+            }
+        }
+        Ok(icons)
     }
 }
 
 #[derive(Debug)]
 struct Icon {
-    category: String,
-    prefix: String,
-    size: kurbo::Size,
+    category: Arc<str>,
+    name: Arc<str>,
+    variant: Arc<str>,
+    size: f64,
+    paths: Vec<OpacityPath>,
 }
 
 impl Icon {
-    fn path(&self) -> PathBuf {
-        format!(
-            "../material-design-icons/{}/svg/production/ic_{}_{}px.svg",
-            self.category,
-            self.prefix,
-            MaterialSize(self.size)
-        )
-        .into()
+    fn from_path(
+        path: &Path,
+        category: Arc<str>,
+        name: Arc<str>,
+        variant: Arc<str>,
+        size: f64,
+    ) -> Result<Self> {
+        let raw = fs::read(path).context(format!("reading {}", path.display()))?;
+        let opts = usvg::Options::default();
+        let doc = usvg::Tree::from_data(&raw, &opts.to_ref())?;
+        //println!("{:?}", doc.to_string(&Default::default()));
+        let mut children = doc.root().children();
+        let defs = children.next().context("expected children")?;
+        if defs.has_children() {
+            log::warn!(
+                "ignoring defs, will probably output incorrect icon ({}/{}/{})",
+                category,
+                name,
+                variant
+            );
+        }
+
+        let mut paths = vec![];
+        let mut transform = vec![];
+        for child in children {
+            handle_child(child, &mut transform, 1., &mut paths)?;
+        }
+        Ok(Self {
+            category,
+            name,
+            variant,
+            size,
+            paths,
+        })
     }
 
     fn const_name(&self) -> String {
-        let name = self.prefix.to_shouty_snake_case();
-        if name.starts_with("3") {
-            format!("THREE_{}", &name[1..])
+        let name = self.name.to_shouty_snake_case();
+        if matches!(name.chars().next(), Some(d) if d.is_digit(10)) {
+            format!("_{}", name)
         } else {
             name
         }
-    }
-
-    fn shapes(&self) -> Vec<KurboShape> {
-        println!("Getting {}", self.path().display());
-        let raw = fs::read_to_string(self.path()).unwrap();
-        let doc = Document::parse(&raw).unwrap();
-        let svg = doc.root_element();
-        assert!(svg.has_tag_name("svg"));
-        assert_eq!(
-            svg.attribute("width").unwrap(),
-            MaterialSize(self.size).to_string()
-        );
-        assert_eq!(
-            svg.attribute("height").unwrap(),
-            MaterialSize(self.size).to_string()
-        );
-        svg.children().map(|el| KurboShape::from_svg(el)).collect()
     }
 
     fn implement(&self) -> Implement {
@@ -66,47 +182,101 @@ impl Icon {
     }
 }
 
-#[derive(Debug)]
-pub enum KurboShape {
-    Circle(kurbo::Circle),
-    BezPath(kurbo::BezPath),
+/// Function to be called recursively to extract paths from svg.
+fn handle_child(
+    node: usvg::Node,
+    transform: &mut Vec<kurbo::Affine>,
+    mut opacity: f64,
+    paths: &mut Vec<OpacityPath>,
+) -> Result {
+    match &*node.borrow() {
+        usvg::NodeKind::Path(path) => {
+            let mut path = handle_path(path);
+            for aff in transform.iter().rev() {
+                path = *aff * path;
+            }
+            paths.push(OpacityPath { path, opacity });
+        }
+        usvg::NodeKind::Group(group) => {
+            let (aff, opacity_change) = handle_group(group)?;
+            if let Some(aff) = aff {
+                transform.push(aff);
+            }
+            if let Some(op) = opacity_change {
+                opacity *= op
+            }
+            for child in node.children() {
+                handle_child(child, transform, opacity, paths)?;
+            }
+            if aff.is_some() {
+                transform.pop();
+            }
+        }
+        other => log::warn!("unexpected node type {:?}", other),
+    }
+    Ok(())
 }
 
-impl KurboShape {
-    fn from_svg(input: Node) -> Self {
-        match input.tag_name().name() {
-            "circle" => {
-                let cx = input.attribute("cx").unwrap().parse::<f64>().unwrap();
-                let cy = input.attribute("cy").unwrap().parse::<f64>().unwrap();
-                let r = input.attribute("r").unwrap().parse::<f64>().unwrap();
-                KurboShape::Circle(kurbo::Circle::new((cx, cy), r))
-            }
-            "path" => {
-                let d = input.attribute("d").unwrap();
-                KurboShape::BezPath(kurbo::BezPath::from_svg(d).unwrap())
-            }
-            other => panic!("unrecognised node: {}", other),
+/// Check that the group makes no difference
+fn handle_group(input: &usvg::Group) -> Result<(Option<kurbo::Affine>, Option<f64>)> {
+    ensure!(input.id == "");
+    // transform below
+    let transform = if input.transform != usvg::Transform::new(1., 0., 0., 1., 0., 0.) {
+        let t = input.transform;
+        Some(kurbo::Affine::new([t.a, t.b, t.c, t.d, t.e, t.f]))
+    } else {
+        None
+    };
+    let opacity = if input.opacity.value() != 1. {
+        Some(input.opacity.value())
+    } else {
+        None
+    };
+    if input.clip_path.is_some() {
+        log::warn!("unhandled clip path");
+    }
+    ensure!(input.mask.is_none());
+    ensure!(input.filter.is_empty());
+    ensure!(input.filter_fill.is_none());
+    ensure!(input.filter_stroke.is_none());
+    // ignore enable_background
+
+    Ok((transform, opacity))
+}
+
+fn handle_path(input: &usvg::Path) -> kurbo::BezPath {
+    let mut bez_path = kurbo::BezPath::new();
+    for segment in input.data.0.iter().cloned() {
+        match segment {
+            usvg::PathSegment::MoveTo { x, y } => bez_path.move_to((x, y)),
+            usvg::PathSegment::LineTo { x, y } => bez_path.line_to((x, y)),
+            usvg::PathSegment::CurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => bez_path.curve_to((x1, y1), (x2, y2), (x, y)),
+            usvg::PathSegment::ClosePath => bez_path.close_path(),
         }
     }
+    bez_path
 }
 
-impl Display for KurboShape {
+#[derive(Debug)]
+pub struct OpacityPath {
+    path: kurbo::BezPath,
+    opacity: f64,
+}
+
+impl Display for OpacityPath {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            KurboShape::Circle(circle) => write!(
-                f,
-                "IconShape::Circle(Circle {{ center: {}, radius: {:.2} }})",
-                KurboPoint(circle.center),
-                circle.radius
-            ),
-            KurboShape::BezPath(path) => {
-                f.write_str("IconShape::PathEls(&[")?;
-                for el in path.iter() {
-                    write!(f, "{},", KurboEl(el))?;
-                }
-                f.write_str("])")
-            }
+        f.write_str("IconPath { els: &[")?;
+        for el in self.path.iter() {
+            write!(f, "{},", KurboEl(el))?;
         }
+        write!(f, "], opacity: {:.2} }}", self.opacity)
     }
 }
 
@@ -160,21 +330,21 @@ pub struct Implement<'a>(&'a Icon);
 
 impl Display for Implement<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut shapes = String::new();
-        for shape in self.0.shapes() {
-            writeln!(shapes, "{},", shape)?;
+        let mut paths = String::new();
+        for path in &self.0.paths {
+            writeln!(paths, "{},", path)?;
         }
         write!(
             f,
             r#"
-pub const {}: IconShapes = IconShapes {{
-    shapes: &[{}],
+pub const {}: IconPaths = IconPaths {{
+    paths: &[{}],
     size: {},
 }};
         "#,
             self.0.const_name(),
-            shapes,
-            KurboSize(self.0.size)
+            paths,
+            KurboSize(kurbo::Size::new(self.0.size, self.0.size))
         )
     }
 }

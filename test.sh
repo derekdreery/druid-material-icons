@@ -3,7 +3,7 @@
 set -e
 
 pushd generate-icons
-cargo run
+cargo run --release
 popd
 mv generate-icons/icons.rs src/icons.rs.in
 cargo check
