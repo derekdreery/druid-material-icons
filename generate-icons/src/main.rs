@@ -10,6 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use usvg::Visibility;
 
 static ICON_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\d+)px\.svg$").unwrap());
 const USE: &str = r#"
@@ -191,11 +192,12 @@ fn handle_child(
 ) -> Result {
     match &*node.borrow() {
         usvg::NodeKind::Path(path) => {
-            let mut path = handle_path(path);
-            for aff in transform.iter().rev() {
-                path = *aff * path;
+            if let Some(mut path) = handle_path(path) {
+                for aff in transform.iter().rev() {
+                    path = *aff * path;
+                }
+                paths.push(OpacityPath { path, opacity });
             }
-            paths.push(OpacityPath { path, opacity });
         }
         usvg::NodeKind::Group(group) => {
             let (aff, opacity_change) = handle_group(group)?;
@@ -244,7 +246,10 @@ fn handle_group(input: &usvg::Group) -> Result<(Option<kurbo::Affine>, Option<f6
     Ok((transform, opacity))
 }
 
-fn handle_path(input: &usvg::Path) -> kurbo::BezPath {
+fn handle_path(input: &usvg::Path) -> Option<kurbo::BezPath> {
+    if matches!(input.visibility, Visibility::Hidden) || input.fill.is_none() {
+        return None;
+    }
     let mut bez_path = kurbo::BezPath::new();
     for segment in input.data.0.iter().cloned() {
         match segment {
@@ -261,7 +266,7 @@ fn handle_path(input: &usvg::Path) -> kurbo::BezPath {
             usvg::PathSegment::ClosePath => bez_path.close_path(),
         }
     }
-    bez_path
+    Some(bez_path)
 }
 
 #[derive(Debug)]
