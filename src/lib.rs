@@ -1,3 +1,6 @@
+//! This library includes icons from Google's [material design icons
+//! repository](https://github.com/google/material-design-icons).
+
 #[cfg(feature = "druid")]
 use druid::{
     kurbo::{Affine, PathEl, Point, Rect, Shape, Size},
@@ -17,7 +20,7 @@ use kurbo::{PathEl, Point, Rect, Shape, Size};
 /// # struct MyData;
 /// use druid_material_icons as icons;
 /// fn build_ui() -> impl Widget<MyData> {
-///     icons::ADD.new(Color::BLACK).fix_width(12.0).center()
+///     icons::normal::content::ADD.new(Color::BLACK).fix_width(12.0).center()
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -81,7 +84,7 @@ impl<T: Data> Widget<T> for Icon {
 /// # struct MyData;
 /// use druid_material_icons as icons;
 /// fn build_ui() -> impl Widget<MyData> {
-///     icons::ADD.new(Color::BLACK).fix_width(12.0).center()
+///     icons::normal::content::ADD.new(Color::BLACK).fix_width(12.0).center()
 /// }
 /// ```
 #[derive(Debug, Copy, Clone)]
