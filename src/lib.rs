@@ -104,8 +104,8 @@ pub struct IconPath {
 }
 
 impl Shape for IconPath {
-    type PathElementsIter = std::iter::Copied<std::slice::Iter<'static, PathEl>>;
-    fn path_elements(&self, _tolerance: f64) -> Self::PathElementsIter {
+    type PathElementsIter<'a> = std::iter::Copied<std::slice::Iter<'static, PathEl>>;
+    fn path_elements(&self, _tolerance: f64) -> Self::PathElementsIter<'_> {
         self.els.iter().copied()
     }
 

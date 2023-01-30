@@ -17,9 +17,19 @@ const USE: &str = r#"
 use crate::{PathEl, Point, Size, IconPath, IconPaths};
 "#;
 
+#[derive(Parser)]
+struct Opt {
+    #[clap(long, short, parse(from_os_str))]
+    path: Option<PathBuf>,
+}
+
 #[qu::ick]
-fn main() -> Result {
-    let icons = Icons::load("../material-design-icons")?;
+fn main(opt: Opt) -> Result {
+    let icons = Icons::load(
+        opt.path
+            .as_deref()
+            .unwrap_or(Path::new("../material-design-icons")),
+    )?;
     let mut out = fs::File::create("icons.rs").context("creating `icons.rs`")?;
     for (variant, icons) in icons.0.iter() {
         // We are generating way too much output, which slows down rustc a lot. I would love to
@@ -50,7 +60,9 @@ impl Icons {
     fn load(root: impl AsRef<Path>) -> Result<Self> {
         let mut icons = Icons(BTreeMap::new());
         let root = root.as_ref().join("src");
-        for entry in fs::read_dir(&root).context("reading root directory")? {
+        for entry in
+            fs::read_dir(&root).context(format!("reading root directory ({})", root.display()))?
+        {
             let entry = entry?;
             let category: Arc<str> = entry
                 .file_name()
